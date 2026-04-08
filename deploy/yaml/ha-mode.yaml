@@ -256,7 +256,7 @@ spec:
       containers:
         - name: replikator
           image: cloudresty/replikator:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
               name: metrics
@@ -272,7 +272,7 @@ spec:
             - name: LOGGING_MINIMUM_LEVEL
               value: "Information"
             - name: REFLECTION_DELETE_ORPHANED_MIRRORS
-              value: "false"
+              value: "true"
           livenessProbe:
             httpGet:
               path: /healthz
