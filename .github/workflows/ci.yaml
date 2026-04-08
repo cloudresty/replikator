@@ -61,13 +61,13 @@ jobs:
         name: codecov-umbrella
 
     - name: Build binary
-      run: cd app && go build -o replikator .
+      run: cd app && go build -ldflags="-s -w" -o bin/replikator ./cmd/replikator
 
-    - name: Test build output
+    - name: Verify binary
       run: |
         cd app
-        ./replikator -help || echo "Binary built successfully (help command may not be available)"
-        ls -la replikator
+        file bin/replikator
+        ls -la bin/replikator
 
   lint:
     runs-on: ubuntu-latest
@@ -131,24 +131,32 @@ jobs:
 
     - name: Deploy replikator operator
       run: |
-        kubectl apply -f ./deploy/yaml/single-node.yaml --namespace replikator-system
-        kubectl wait --for=condition=available deployment/replikator -n replikator-system --timeout=120s
+        kubectl apply -f ./deploy/yaml/single-node.yaml
+        kubectl patch deployment replikator -n replikator --type='json' -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/image", "value":"cloudresty/replikator:test"}]'
+        kubectl patch deployment replikator -n replikator --type='json' -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/imagePullPolicy", "value":"Never"}]'
+        kubectl rollout status deployment/replikator -n replikator --timeout=120s || (kubectl describe deployment replikator -n replikator && kubectl get pods -n replikator -o wide)
+
+    - name: Check replikator logs
+      run: |
+        kubectl logs -n replikator -l app.kubernetes.io/name=replikator --tail=100
 
     - name: Create test resources
       run: |
         kubectl create namespace test-namespace
         kubectl create secret generic test-secret \
           --namespace test-namespace \
-          --from-literal=key=value \
-          --annotations=replikator.cloudresty.io/replicate=true
+          --from-literal=key=value
+        kubectl annotate secret test-secret \
+          --namespace test-namespace \
+          replikator.cloudresty.io/replicate=true
 
     - name: Verify replication
       run: |
-        kubectl get pods -n replikator-system
+        kubectl get pods -n replikator
         kubectl get secrets -n test-namespace
 
     - name: Cleanup
-      run: kubectl delete namespace test-namespace replikator-system --wait
+      run: kubectl delete namespace test-namespace replikator --wait
 
   docker-release:
     runs-on: ubuntu-latest
