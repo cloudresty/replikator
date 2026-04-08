@@ -145,8 +145,10 @@ jobs:
         kubectl create namespace test-namespace
         kubectl create secret generic test-secret \
           --namespace test-namespace \
-          --from-literal=key=value \
-          --annotations=replikator.cloudresty.io/replicate=true
+          --from-literal=key=value
+        kubectl annotate secret test-secret \
+          --namespace test-namespace \
+          replikator.cloudresty.io/replicate=true
 
     - name: Verify replication
       run: |
