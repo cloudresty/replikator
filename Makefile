@@ -103,11 +103,11 @@ manifest: ## Generate YAML manifests (placeholder for kustomize).
 	@ls -la deploy/yaml/
 
 deploy-kind: ## Deploy to kind cluster for testing.
-	@kubectl apply -f deploy/yaml/single-node.yaml
+	@kubectl apply -f deploy/yaml/single-mode.yaml
 	@kubectl wait --for=condition=available deployment/replikator -n replikator --timeout=120s
 
 undeploy-kind: ## Remove from kind cluster.
-	@kubectl delete -f deploy/yaml/single-node.yaml --wait
+	@kubectl delete -f deploy/yaml/single-mode.yaml --wait
 
 logs-kind: ## Show replikator logs from kind.
 	@kubectl logs -n replikator -l app.kubernetes.io/name=replikator -f

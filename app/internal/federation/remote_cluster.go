@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -82,7 +83,7 @@ func (m *RemoteClusterManager) HealthCheck(ctx context.Context) map[string]bool 
 
 func (m *RemoteClusterManager) UpdateLastSync(name string) {
 	if cfg, ok := m.clusters[name]; ok {
-		cfg.LastSyncTime = int64(1234567890)
+		cfg.LastSyncTime = time.Now().Unix()
 	}
 }
 

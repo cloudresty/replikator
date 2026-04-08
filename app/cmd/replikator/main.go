@@ -25,7 +25,7 @@ import (
 
 	certmanagerv1 "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 
-	"replikator/apis/replication/v1"
+	v1 "replikator/apis/replication/v1"
 	"replikator/internal/application/usecase"
 	"replikator/internal/controllers"
 	infrastructureevent "replikator/internal/domain/event"
@@ -229,7 +229,7 @@ func main() {
 	}
 
 	clusterRuleValidator := webhooks.NewClusterReplicationRuleValidator()
-	mgr.GetWebhookServer().Register("/validate-replication-cloudresty-io-v1-clusterreplicationrule", &admission.Webhook{Handler: clusterRuleValidator})
+	mgr.GetWebhookServer().Register("/validate-replikator-cloudresty-io-v1-clusterreplicationrule", &admission.Webhook{Handler: clusterRuleValidator})
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "Unable to set up health check")

@@ -109,7 +109,6 @@ func RecordReflectionSuccess(sourceNamespace, sourceName, mirrorNamespace string
 	ReflectionDuration.WithLabelValues(sourceNamespace, sourceName, mirrorNamespace).Observe(duration.Seconds())
 	LastSyncTimestamp.WithLabelValues(sourceNamespace, sourceName).Set(float64(time.Now().Unix()))
 	MirroredAssetsTotal.WithLabelValues("active", mirrorNamespace).Inc()
-	SyncErrorsTotal.WithLabelValues("none").Inc()
 }
 
 func RecordReflectionError(sourceNamespace, sourceName, mirrorNamespace string, errType string) {
