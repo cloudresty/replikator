@@ -34,21 +34,20 @@ func (s *CrossClusterSyncService) SyncSecretToCluster(ctx context.Context, clust
 		return fmt.Errorf("cluster %s not available", clusterName)
 	}
 
-	targetSecret := &corev1.Secret{}
-	_, err := clusterClient.CoreV1().Secrets(targetNamespace).Get(ctx, secret.Name, metav1.GetOptions{})
+	start := time.Now()
+	existing, err := clusterClient.CoreV1().Secrets(targetNamespace).Get(ctx, secret.Name, metav1.GetOptions{})
 	if err == nil {
-		targetSecret.Data = secret.Data
-		targetSecret.Type = secret.Type
-		targetSecret.Labels = secret.Labels
-		targetSecret.Annotations = secret.Annotations
-		targetSecret.Namespace = targetNamespace
-		_, err = clusterClient.CoreV1().Secrets(targetNamespace).Update(ctx, targetSecret, metav1.UpdateOptions{})
+		existing.Data = secret.Data
+		existing.Type = secret.Type
+		existing.Labels = secret.Labels
+		existing.Annotations = secret.Annotations
+		_, err = clusterClient.CoreV1().Secrets(targetNamespace).Update(ctx, existing, metav1.UpdateOptions{})
 	} else if apierrors.IsNotFound(err) {
-		targetSecret = secret.DeepCopy()
-		targetSecret.Namespace = targetNamespace
-		targetSecret.ResourceVersion = ""
-		targetSecret.UID = ""
-		_, err = clusterClient.CoreV1().Secrets(targetNamespace).Create(ctx, targetSecret, metav1.CreateOptions{})
+		newSecret := secret.DeepCopy()
+		newSecret.Namespace = targetNamespace
+		newSecret.ResourceVersion = ""
+		newSecret.UID = ""
+		_, err = clusterClient.CoreV1().Secrets(targetNamespace).Create(ctx, newSecret, metav1.CreateOptions{})
 	}
 	if err != nil {
 		metrics.RecordReflectionError(secret.Namespace, secret.Name, targetNamespace, "cross_cluster_sync_failed")
@@ -56,7 +55,7 @@ func (s *CrossClusterSyncService) SyncSecretToCluster(ctx context.Context, clust
 	}
 
 	s.clusterManager.UpdateLastSync(clusterName)
-	metrics.RecordReflectionSuccess(secret.Namespace, secret.Name, fmt.Sprintf("%s:%s", clusterName, targetNamespace), time.Since(time.Now()))
+	metrics.RecordReflectionSuccess(secret.Namespace, secret.Name, fmt.Sprintf("%s:%s", clusterName, targetNamespace), time.Since(start))
 	return nil
 }
 
@@ -66,21 +65,20 @@ func (s *CrossClusterSyncService) SyncConfigMapToCluster(ctx context.Context, cl
 		return fmt.Errorf("cluster %s not available", clusterName)
 	}
 
-	targetCM := &corev1.ConfigMap{}
-	_, err := clusterClient.CoreV1().ConfigMaps(targetNamespace).Get(ctx, cm.Name, metav1.GetOptions{})
+	start := time.Now()
+	existingCM, err := clusterClient.CoreV1().ConfigMaps(targetNamespace).Get(ctx, cm.Name, metav1.GetOptions{})
 	if err == nil {
-		targetCM.Data = cm.Data
-		targetCM.BinaryData = cm.BinaryData
-		targetCM.Labels = cm.Labels
-		targetCM.Annotations = cm.Annotations
-		targetCM.Namespace = targetNamespace
-		_, err = clusterClient.CoreV1().ConfigMaps(targetNamespace).Update(ctx, targetCM, metav1.UpdateOptions{})
+		existingCM.Data = cm.Data
+		existingCM.BinaryData = cm.BinaryData
+		existingCM.Labels = cm.Labels
+		existingCM.Annotations = cm.Annotations
+		_, err = clusterClient.CoreV1().ConfigMaps(targetNamespace).Update(ctx, existingCM, metav1.UpdateOptions{})
 	} else if apierrors.IsNotFound(err) {
-		targetCM = cm.DeepCopy()
-		targetCM.Namespace = targetNamespace
-		targetCM.ResourceVersion = ""
-		targetCM.UID = ""
-		_, err = clusterClient.CoreV1().ConfigMaps(targetNamespace).Create(ctx, targetCM, metav1.CreateOptions{})
+		newCM := cm.DeepCopy()
+		newCM.Namespace = targetNamespace
+		newCM.ResourceVersion = ""
+		newCM.UID = ""
+		_, err = clusterClient.CoreV1().ConfigMaps(targetNamespace).Create(ctx, newCM, metav1.CreateOptions{})
 	}
 	if err != nil {
 		metrics.RecordReflectionError(cm.Namespace, cm.Name, targetNamespace, "cross_cluster_sync_failed")
@@ -88,7 +86,7 @@ func (s *CrossClusterSyncService) SyncConfigMapToCluster(ctx context.Context, cl
 	}
 
 	s.clusterManager.UpdateLastSync(clusterName)
-	metrics.RecordReflectionSuccess(cm.Namespace, cm.Name, fmt.Sprintf("%s:%s", clusterName, targetNamespace), time.Since(time.Now()))
+	metrics.RecordReflectionSuccess(cm.Namespace, cm.Name, fmt.Sprintf("%s:%s", clusterName, targetNamespace), time.Since(start))
 	return nil
 }
 

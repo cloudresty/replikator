@@ -6,7 +6,7 @@ import (
 )
 
 var (
-	SchemeGroupVersion = schema.GroupVersion{Group: "replication.replikator.io", Version: "v1"}
+	SchemeGroupVersion = schema.GroupVersion{Group: "replikator.cloudresty.io", Version: "v1"}
 	SchemeBuilder      = runtime.NewSchemeBuilder(addKnownTypes)
 	addKnownTypes      = func(s *runtime.Scheme) error {
 		s.AddKnownTypes(SchemeGroupVersion,

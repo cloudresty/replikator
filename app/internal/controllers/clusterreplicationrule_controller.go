@@ -17,7 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"replikator/apis/replication/v1"
+	v1 "replikator/apis/replication/v1"
 	"replikator/internal/application/dto"
 	"replikator/internal/application/usecase"
 	"replikator/internal/domain/entity"
@@ -210,10 +210,7 @@ func (r *ClusterReplicationRuleReconciler) compileSelector(selector string) (*re
 		return nil, fmt.Errorf("selector cannot be empty")
 	}
 
-	regexStr := strings.ReplaceAll(selector, ".", "\\.")
-	regexStr = strings.ReplaceAll(regexStr, "*", ".*")
-	regexStr = strings.ReplaceAll(regexStr, "?", ".")
-
+	regexStr := selector
 	if !strings.HasPrefix(selector, "^") && !strings.HasPrefix(selector, ".*") {
 		regexStr = "^" + regexStr
 	}
@@ -475,10 +472,7 @@ func (r *ClusterReplicationRuleReconciler) transformTargetName(sourceName string
 		}
 
 		replacement := ""
-		regexStr := strings.ReplaceAll(rule.Spec.SourceSelector, ".", "\\.")
-		regexStr = strings.ReplaceAll(regexStr, "*", ".*")
-		regexStr = strings.ReplaceAll(regexStr, "?", ".")
-
+		regexStr := rule.Spec.SourceSelector
 		if !strings.HasPrefix(rule.Spec.SourceSelector, "^") && !strings.HasPrefix(rule.Spec.SourceSelector, ".*") {
 			regexStr = "^" + regexStr
 		}

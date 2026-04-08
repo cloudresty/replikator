@@ -19,6 +19,7 @@ An enterprise-grade, blazing-fast Kubernetes operator written in Go, designed to
 - [ClusterReplicationRule (CRD)](#clusterreplicationrule-crd)
 - [Security & Architecture](#security--architecture)
 - [Metrics & Observability](#metrics--observability)
+- [Configuration](#configuration)
 - [Deployment](#deployment)
 - [Examples](#examples)
 - [Contributing](#contributing)
@@ -107,7 +108,7 @@ These are system-level state flags applied to the *mirrored* objects by Replikat
 For enterprise platform teams, relying entirely on annotations creates an unmanageable decentralized headache. You can instead declare **Global Replication Policies** using Replikator's CRD.
 
 ```yaml
-apiVersion: replication.cloudresty.io/v1
+apiVersion: replikator.cloudresty.io/v1
 kind: ClusterReplicationRule
 metadata:
   name: sync-wildcard-tls
@@ -127,10 +128,17 @@ spec:
 
 The CRD supports:
 
-- **`sourceSelector`**: Regex pattern to match source resource names
-- **`resourceTypes`**: Array of types to sync (Secret, ConfigMap)
-- **`targetNamespaces`**: Object with `selector` (regex), `includes` (exact match list), `excludes` (list to skip)
-- **`targetNameTemplate`**: Optional template for renaming resources in target namespaces (uses `$1`, `$2`, etc. from regex capture groups)
+| Field | Description |
+| :--- | :--- |
+| `spec.sourceNamespace` | *(Required)* The namespace to watch for source resources. |
+| `spec.sourceSelector` | *(Required)* Regex pattern to match source resource names (e.g. `".*-tls$"`). |
+| `spec.resourceTypes` | Array of resource types to sync. Supported values: `Secret`, `ConfigMap`, `Certificate`, `Ingress`. Defaults to `Secret` and `ConfigMap` if omitted. |
+| `spec.targetNamespaces.selector` | Regex to match target namespace names. |
+| `spec.targetNamespaces.includes` | Exact list of namespaces to always include. |
+| `spec.targetNamespaces.excludes` | Exact list of namespaces to skip. |
+| `spec.targetNameTemplate` | Optional rename template for mirrors using `$1`, `$2`, etc. from regex capture groups in `sourceSelector`. |
+| `spec.annotationsToCopy` | List of annotation keys to copy from the source resource to each mirror (prefixed with `replikator.cloudresty.io/copied-`). |
+| `spec.labelsToCopy` | List of label keys to copy from the source resource to each mirror. |
 
 ### Zero-Touch Source (No Annotation Required)
 
@@ -140,7 +148,19 @@ Unlike annotation-based replication, ClusterReplicationRule can sync **any** res
 - Forked Helm charts where you can't modify annotations
 - Vendor operators that strip custom annotations
 
-*Note: CRDs update their `status.lastSyncTime`, `status.mirroredCount`, and `status.syncedResources` so you have immediate visibility into the state!*
+### Status Fields
+
+Each `ClusterReplicationRule` exposes a rich `status` block updated after every reconciliation:
+
+| Field | Description |
+| :--- | :--- |
+| `status.activeMirrors` | Number of namespaces currently receiving mirrors from this rule. |
+| `status.mirroredCount` | Total number of individual mirror resources created. |
+| `status.errors` | Number of errors encountered during the last sync. |
+| `status.observedGeneration` | The resource generation last processed by the controller. |
+| `status.lastSyncTime` | RFC3339 timestamp of the last successful sync. |
+| `status.syncedResources` | Per-resource breakdown: name, namespace, type, mirror count, and last sync time. |
+| `status.condition` | Current condition of the rule (`Active` or `Error`) with reason and message. |
 
 &nbsp;
 
@@ -163,10 +183,47 @@ Replikator enforces high-end security scoping out of the box:
 
 ## Metrics & Observability
 
-To grant platform engineers extreme operational confidence, Replikator exposes custom, business-logic Prometheus metrics such as:
+Replikator exposes Prometheus metrics on port `8080` (path `/metrics`). All metrics are prefixed with `replikator_`:
 
-- `replikator_synced_total`
-- `replikator_sync_errors_total`
+| Metric | Type | Description |
+| :--- | :--- | :--- |
+| `replikator_mirrored_assets_total` | Gauge | Total mirrored assets by `state` (`active`, `stale`, `failed`) and `namespace` |
+| `replikator_sync_errors_total` | Counter | Total sync errors by `type` |
+| `replikator_sources_total` | Gauge | Total sources by `state` (`enabled`, `disabled`, `error`) and `namespace` |
+| `replikator_reflection_duration_seconds` | Histogram | Duration of individual reflection operations |
+| `replikator_last_sync_timestamp` | Gauge | Unix timestamp of last successful sync per source |
+| `replikator_auto_mirrors_total` | Gauge | Total auto-created mirrors by `namespace` |
+| `replikator_manual_mirrors_total` | Gauge | Total manually created mirrors by `namespace` |
+| `replikator_cache_hits_total` | Counter | Cache hits by `cache` name |
+| `replikator_cache_misses_total` | Counter | Cache misses by `cache` name |
+| `replikator_watch_session_restarts_total` | Counter | Total watch session restarts due to timeout |
+| `replikator_reconciliation_duration_seconds` | Histogram | Reconciliation duration by `controller` and `result` |
+| `replikator_active_workers` | Gauge | Number of currently active worker goroutines |
+
+&nbsp;
+
+🔝 [back to top](#replikator)
+
+&nbsp;
+
+## Configuration
+
+Replikator is configured entirely through environment variables. All variables are optional and have safe defaults.
+
+| Environment Variable | Default | Description |
+| :--- | :--- | :--- |
+| `LOGGING_MINIMUM_LEVEL` | `Information` | Minimum log level. Accepts `Debug`, `Information`, `Warning`, `Error`. |
+| `WATCHER_TIMEOUT_SECONDS` | `3600` | How long (in seconds) a watch session is held open before being recycled. |
+| `KUBERNETES_SKIP_TLS_VERIFY` | `false` | Skip TLS verification when connecting to the Kubernetes API. Not recommended for production. |
+| `REFLECTION_DELETE_ORPHANED_MIRRORS` | `false` | When `true`, Replikator actively deletes mirror resources whose source has been removed or has revoked replication permission. |
+
+The operator also accepts the following CLI flags:
+
+| Flag | Default | Description |
+| :--- | :--- | :--- |
+| `--metrics-bind-address` | `:8080` | Address the Prometheus metrics endpoint binds to. |
+| `--health-probe-bind-address` | `:8081` | Address the liveness and readiness probe endpoints bind to. |
+| `--leader-elect` | `false` | Enable leader election. Required when running multiple replicas (HA mode). |
 
 &nbsp;
 
@@ -186,7 +243,7 @@ Replikator provides two out-of-the-box deployment options depending on your clus
 Runs multiple replicas with Leader Election enabled to guarantee zero downtime during cluster upgrades or node failures.
 
 ```sh
-kubectl apply -f https://raw.githubusercontent.com/cloudresty/replikator/main/deploy/yaml/ha-multi-node.yaml
+kubectl apply -f https://raw.githubusercontent.com/cloudresty/replikator/main/deploy/yaml/ha-mode.yaml
 ```
 
 &nbsp;
@@ -195,7 +252,7 @@ kubectl apply -f https://raw.githubusercontent.com/cloudresty/replikator/main/de
 Runs a single lightweight instance without Leader Election overhead.
 
 ```sh
-kubectl apply -f https://raw.githubusercontent.com/cloudresty/replikator/main/deploy/yaml/single-node.yaml
+kubectl apply -f https://raw.githubusercontent.com/cloudresty/replikator/main/deploy/yaml/single-mode.yaml
 ```
 
 &nbsp;
@@ -332,7 +389,7 @@ If you later remove `services-*` from the list, Replikator deletes the mirrored 
 For platform teams managing hundreds of secrets across many namespaces, use the CRD:
 
 ```yaml
-apiVersion: replication.cloudresty.io/v1
+apiVersion: replikator.cloudresty.io/v1
 kind: ClusterReplicationRule
 metadata:
   name: sync-all-tls
@@ -357,7 +414,7 @@ This syncs all secrets ending with `-tls` from the `security` namespace to every
 Use `includes` for exact namespace matching:
 
 ```yaml
-apiVersion: replication.cloudresty.io/v1
+apiVersion: replikator.cloudresty.io/v1
 kind: ClusterReplicationRule
 metadata:
   name: sync-configs-to-envs
@@ -382,7 +439,7 @@ Only syncs to exactly `dev`, `staging`, and `production` namespaces.
 Replicate auto-generated Elastic secrets without requiring annotations on the source:
 
 ```yaml
-apiVersion: replication.cloudresty.io/v1
+apiVersion: replikator.cloudresty.io/v1
 kind: ClusterReplicationRule
 metadata:
   name: eck-credentials-router
@@ -407,7 +464,7 @@ ECK creates secrets like `prod-cluster-es-elastic-user`. This CRD syncs it to `d
 For complex naming patterns, use multiple capture groups:
 
 ```yaml
-apiVersion: replication.cloudresty.io/v1
+apiVersion: replikator.cloudresty.io/v1
 kind: ClusterReplicationRule
 metadata:
   name: mongo-credentials-sync
