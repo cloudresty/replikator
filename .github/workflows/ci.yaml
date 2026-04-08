@@ -63,11 +63,11 @@ jobs:
     - name: Build binary
       run: cd app && go build -ldflags="-s -w" -o bin/replikator ./cmd/replikator
 
-    - name: Test build output
+    - name: Verify binary
       run: |
         cd app
-        ./replikator -help || echo "Binary built successfully (help command may not be available)"
-        ls -la replikator
+        file bin/replikator
+        ls -la bin/replikator
 
   lint:
     runs-on: ubuntu-latest
