@@ -61,7 +61,7 @@ jobs:
         name: codecov-umbrella
 
     - name: Build binary
-      run: cd app && go build -o replikator .
+      run: cd app && go build -ldflags="-s -w" -o bin/replikator ./cmd/replikator
 
     - name: Test build output
       run: |
