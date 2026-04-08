@@ -141,25 +141,66 @@ jobs:
 
     - name: Check replikator logs
       run: |
+        # rollout status completes as soon as the deployment is Available, but the
+        # individual pods may still be in ContainerCreating for a brief moment.
+        # Wait for every pod to be Ready before streaming logs.
+        kubectl wait --for=condition=Ready pod \
+          -l app.kubernetes.io/name=replikator \
+          -n replikator \
+          --timeout=60s
         kubectl logs -n replikator -l app.kubernetes.io/name=replikator --tail=100
 
-    - name: Create test resources
+    - name: Create test namespaces and source secret
       run: |
-        kubectl create namespace test-namespace
-        kubectl create secret generic test-secret \
-          --namespace test-namespace \
-          --from-literal=key=value
-        kubectl annotate secret test-secret \
-          --namespace test-namespace \
-          replikator.cloudresty.io/replicate=true
+        kubectl create namespace replikator-source
+        kubectl create namespace replikator-target
+        kubectl create secret generic my-app-config \
+          --namespace replikator-source \
+          --from-literal=api-key=test-value-123
 
-    - name: Verify replication
+    - name: Create ClusterReplicationRule
       run: |
-        kubectl get pods -n replikator
-        kubectl get secrets -n test-namespace
+        kubectl apply -f - <<'EOF'
+        apiVersion: replikator.cloudresty.io/v1
+        kind: ClusterReplicationRule
+        metadata:
+          name: test-replication
+        spec:
+          sourceNamespace: replikator-source
+          sourceSelector: "my-app-config"
+          resourceTypes:
+            - Secret
+          targetNamespaces:
+            includes:
+              - replikator-target
+          targetNameTemplate: "my-app-config"
+        EOF
+
+    - name: Verify CRR replication
+      run: |
+        echo "Waiting for my-app-config to appear in replikator-target..."
+        for i in $(seq 1 30); do
+          if kubectl get secret my-app-config -n replikator-target 2>/dev/null; then
+            echo "Secret successfully replicated on attempt $i"
+            VALUE=$(kubectl get secret my-app-config -n replikator-target -o jsonpath='{.data.api-key}' | base64 -d)
+            if [ "$VALUE" = "test-value-123" ]; then
+              echo "Secret data matches source - replication is working correctly"
+              exit 0
+            else
+              echo "ERROR: Secret data mismatch. Got: '$VALUE', expected: 'test-value-123'"
+              exit 1
+            fi
+          fi
+          echo "Attempt $i/30: secret not yet present, waiting 2s..."
+          sleep 2
+        done
+        echo "ERROR: Secret was not replicated within 60 seconds"
+        kubectl get clusterreplicationrule test-replication -o yaml
+        kubectl logs -n replikator -l app.kubernetes.io/name=replikator --tail=200
+        exit 1
 
     - name: Cleanup
-      run: kubectl delete namespace test-namespace replikator --wait
+      run: kubectl delete namespace replikator-source replikator-target replikator --wait
 
   # Build each platform in parallel on its own runner, then merge into one manifest.
   # amd64 and arm64 no longer block each other, cutting the total time roughly in half.
