@@ -131,8 +131,10 @@ jobs:
 
     - name: Deploy replikator operator
       run: |
-        kubectl apply -f ./deploy/yaml/single-node.yaml --namespace replikator-system
-        kubectl wait --for=condition=available deployment/replikator -n replikator-system --timeout=120s
+        kubectl apply -f ./deploy/yaml/single-node.yaml
+        kubectl patch deployment replikator -n replikator --type='json' -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/image", "value":"cloudresty/replikator:test"}]'
+        kubectl patch deployment replikator -n replikator --type='json' -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/imagePullPolicy", "value":"Never"}]'
+        kubectl wait --for=condition=available deployment/replikator -n replikator --timeout=120s
 
     - name: Create test resources
       run: |
@@ -144,11 +146,11 @@ jobs:
 
     - name: Verify replication
       run: |
-        kubectl get pods -n replikator-system
+        kubectl get pods -n replikator
         kubectl get secrets -n test-namespace
 
     - name: Cleanup
-      run: kubectl delete namespace test-namespace replikator-system --wait
+      run: kubectl delete namespace test-namespace replikator --wait
 
   docker-release:
     runs-on: ubuntu-latest
