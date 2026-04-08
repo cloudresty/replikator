@@ -134,7 +134,11 @@ jobs:
         kubectl apply -f ./deploy/yaml/single-node.yaml
         kubectl patch deployment replikator -n replikator --type='json' -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/image", "value":"cloudresty/replikator:test"}]'
         kubectl patch deployment replikator -n replikator --type='json' -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/imagePullPolicy", "value":"Never"}]'
-        kubectl wait --for=condition=available deployment/replikator -n replikator --timeout=120s
+        kubectl rollout status deployment/replikator -n replikator --timeout=120s || (kubectl describe deployment replikator -n replikator && kubectl get pods -n replikator -o wide)
+
+    - name: Check replikator logs
+      run: |
+        kubectl logs -n replikator -l app.kubernetes.io/name=replikator --tail=100
 
     - name: Create test resources
       run: |
