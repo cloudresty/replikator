@@ -141,14 +141,11 @@ jobs:
 
     - name: Check replikator logs
       run: |
-        # rollout status completes as soon as the deployment is Available, but the
-        # individual pods may still be in ContainerCreating for a brief moment.
-        # Wait for every pod to be Ready before streaming logs.
-        kubectl wait --for=condition=Ready pod \
-          -l app.kubernetes.io/name=replikator \
-          -n replikator \
-          --timeout=60s
-        kubectl logs -n replikator -l app.kubernetes.io/name=replikator --tail=100
+        # Use the deployment reference, not a pod label selector.
+        # A label selector matches pods from ALL ReplicaSets including old ones
+        # that are still Terminating after a rolling update, causing log commands
+        # to fail. The deployment reference routes to the current active pod only.
+        kubectl logs -n replikator deployment/replikator --tail=100
 
     - name: Create test namespaces and source secret
       run: |
@@ -196,7 +193,7 @@ jobs:
         done
         echo "ERROR: Secret was not replicated within 60 seconds"
         kubectl get clusterreplicationrule test-replication -o yaml
-        kubectl logs -n replikator -l app.kubernetes.io/name=replikator --tail=200
+        kubectl logs -n replikator deployment/replikator --tail=200
         exit 1
 
     - name: Cleanup
