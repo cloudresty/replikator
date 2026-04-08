@@ -202,6 +202,10 @@ func (r *ClusterReplicationRuleReconciler) Reconcile(ctx context.Context, req re
 
 	r.updateRuleStatus(ctx, rule, targetNamespaces)
 
+	log.Debug("ClusterReplicationRule reconciled successfully",
+		"source_namespace", rule.Spec.SourceNamespace,
+		"target_namespaces", len(targetNamespaces),
+		"synced_resources", len(rule.Status.SyncedResources))
 	return reconcile.Result{}, nil
 }
 
@@ -526,6 +530,6 @@ func (r *ClusterReplicationRuleReconciler) updateRuleStatus(ctx context.Context,
 	}
 }
 
-func (r *ClusterReplicationRuleReconciler) SetupWithManager(mgr interface{}) error {
+func (r *ClusterReplicationRuleReconciler) SetupWithManager(mgr any) error {
 	return nil
 }

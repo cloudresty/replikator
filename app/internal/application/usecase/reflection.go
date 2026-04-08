@@ -153,6 +153,10 @@ func (uc *ReflectResourcesUseCase) checkForConflicts(ctx context.Context, source
 				uc.logger.Debug("Skipping Helm secret in target namespace", "namespace", targetNamespace, "name", source.TargetName())
 				return nil
 			}
+			// Already a replikator-managed mirror — not a conflict.
+			if secret.Annotations != nil && secret.Annotations[dto.AnnotationReflects] != "" {
+				return nil
+			}
 			return fmt.Errorf("resource %s/%s already exists", targetNamespace, source.TargetName())
 		}
 		if !apierrors.IsNotFound(err) {
@@ -163,6 +167,10 @@ func (uc *ReflectResourcesUseCase) checkForConflicts(ctx context.Context, source
 		if err == nil {
 			if dto.IsHelmConfigMap(cm) {
 				uc.logger.Debug("Skipping Helm configmap in target namespace", "namespace", targetNamespace, "name", source.TargetName())
+				return nil
+			}
+			// Already a replikator-managed mirror — not a conflict.
+			if cm.Annotations != nil && cm.Annotations[dto.AnnotationReflects] != "" {
 				return nil
 			}
 			return fmt.Errorf("resource %s/%s already exists", targetNamespace, source.TargetName())
@@ -277,6 +285,15 @@ func (uc *ReflectResourcesUseCase) updateMirrorData(ctx context.Context, source 
 			return uc.sourceStore.CreateSecret(ctx, secret)
 		}
 
+		// Skip the write when the source has not changed since the last sync.
+		if secret.Annotations != nil &&
+			secret.Annotations[dto.AnnotationReflectedVersion] == source.Version() {
+			uc.logger.Debug("Mirror is already up to date",
+				"mirror", mirror.FullName(),
+				"version", source.Version())
+			return nil
+		}
+
 		secret.Data = sourceData
 		secret.Annotations = annotationsMap
 		secret.Type = sourceSecretType
@@ -309,6 +326,15 @@ func (uc *ReflectResourcesUseCase) updateMirrorData(ctx context.Context, source 
 				BinaryData: binaryData,
 			}
 			return uc.sourceStore.CreateConfigMap(ctx, cm)
+		}
+
+		// Skip the write when the source has not changed since the last sync.
+		if cm.Annotations != nil &&
+			cm.Annotations[dto.AnnotationReflectedVersion] == source.Version() {
+			uc.logger.Debug("Mirror is already up to date",
+				"mirror", mirror.FullName(),
+				"version", source.Version())
+			return nil
 		}
 
 		cm.Data = data

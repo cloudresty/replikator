@@ -199,7 +199,7 @@ func (a *MirrorAdapter) Get(ctx context.Context, namespace, name string) (*entit
 	return secretToMirror(obj), nil
 }
 
-func secretToMirror(obj interface{}) *entity.Mirror {
+func secretToMirror(obj any) *entity.Mirror {
 	var annotations map[string]string
 	var name, namespace string
 	var resourceType entity.ResourceType

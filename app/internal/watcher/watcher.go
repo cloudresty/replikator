@@ -22,14 +22,14 @@ const (
 type WatchEvent struct {
 	Type      EventType
 	Key       string
-	Object    interface{}
-	OldObject interface{}
+	Object    any
+	OldObject any
 }
 
 type EventHandler interface {
-	OnAdd(obj interface{}) error
-	OnUpdate(obj, oldObj interface{}) error
-	OnDelete(obj interface{}) error
+	OnAdd(obj any) error
+	OnUpdate(obj, oldObj any) error
+	OnDelete(obj any) error
 	OnError(err error) error
 }
 
@@ -316,12 +316,12 @@ func (d *EventDispatcher) dispatchEvent(event WatchEvent) {
 }
 
 type ResourceVersioner interface {
-	GetResourceVersion(obj interface{}) (string, error)
+	GetResourceVersion(obj any) (string, error)
 }
 
 type DefaultResourceVersioner struct{}
 
-func (v *DefaultResourceVersioner) GetResourceVersion(obj interface{}) (string, error) {
+func (v *DefaultResourceVersioner) GetResourceVersion(obj any) (string, error) {
 	m, err := meta.Accessor(obj)
 	if err != nil {
 		return "", err

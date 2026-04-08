@@ -117,6 +117,7 @@ func (r *SourceReconciler) Reconcile(ctx context.Context, req reconcile.Request)
 		return reconcile.Result{}, fmt.Errorf("failed to replicate: %w", err)
 	}
 
+	log.Debug("Source reconciled successfully")
 	return reconcile.Result{}, nil
 }
 
@@ -220,7 +221,7 @@ func (r *SourceReconciler) configMapToSource(cm *corev1.ConfigMap) *entity.Sourc
 	return source
 }
 
-func (r *SourceReconciler) SetupWithManager(mgr interface{}) error {
+func (r *SourceReconciler) SetupWithManager(mgr any) error {
 	return nil
 }
 
@@ -373,6 +374,9 @@ func (r *MirrorReconciler) Reconcile(ctx context.Context, req reconcile.Request)
 
 	sourceNamespace := parts[0]
 	sourceName := parts[1]
+	isAuto := obj.Annotations[dto.AnnotationAutoReflects] == "true"
+	sourceID := valueobject.NewSourceID(sourceNamespace, sourceName)
+	mirrorID := valueobject.NewMirrorID(req.Namespace, req.Name)
 
 	source, err := r.fetchSource(ctx, sourceNamespace, sourceName)
 	if err != nil {
@@ -382,6 +386,26 @@ func (r *MirrorReconciler) Reconcile(ctx context.Context, req reconcile.Request)
 	}
 
 	if source == nil {
+		if isAuto {
+			// Auto-mirrors are driven by ClusterReplicationRule; the source resource is
+			// not required to carry replikator.cloudresty.io/replicate="true". Register
+			// the mirror in the store so CRR reconciles can find it. Do NOT delete it —
+			// auto-mirror lifecycle is managed exclusively by the CRR controller.
+			mirror := entity.NewMirror(mirrorID, sourceID, req.Namespace, req.Name, entity.ResourceTypeSecret)
+			mirror.SetAutoCreated(true)
+			if reflectedAt := obj.Annotations[dto.AnnotationReflectedAt]; reflectedAt != "" {
+				mirror.SetReflectedAt(reflectedAt)
+			}
+			r.mirrorStore.RegisterMirror(mirror)
+			r.mirrorCache.Set(mirrorID.String(), &infcache.MirrorEntry{
+				MirrorID:   mirrorID.String(),
+				SourceID:   sourceID.String(),
+				IsAuto:     true,
+				CreatedAt:  time.Now(),
+				LastSyncAt: time.Now(),
+			})
+			return reconcile.Result{}, nil
+		}
 		log.Info("Source no longer exists")
 		if err := r.deleteMirrorIfOrphaned(ctx, req.Namespace, req.Name); err != nil {
 			reconcileErr = err
@@ -389,11 +413,6 @@ func (r *MirrorReconciler) Reconcile(ctx context.Context, req reconcile.Request)
 		}
 		return reconcile.Result{}, nil
 	}
-
-	sourceID := valueobject.NewSourceID(sourceNamespace, sourceName)
-	mirrorID := valueobject.NewMirrorID(req.Namespace, req.Name)
-
-	isAuto := obj.Annotations[dto.AnnotationAutoReflects] == "true"
 
 	mirror := entity.NewMirror(mirrorID, sourceID, req.Namespace, req.Name, source.ResourceType())
 	mirror.SetAutoCreated(isAuto)
@@ -419,6 +438,7 @@ func (r *MirrorReconciler) Reconcile(ctx context.Context, req reconcile.Request)
 		}
 	}
 
+	log.Debug("Mirror reconciled successfully")
 	return reconcile.Result{}, nil
 }
 
@@ -552,7 +572,7 @@ func (r *MirrorReconciler) splitReflectsAnnotation(value string) []string {
 	return []string{"", value}
 }
 
-func (r *MirrorReconciler) SetupWithManager(mgr interface{}) error {
+func (r *MirrorReconciler) SetupWithManager(mgr any) error {
 	return nil
 }
 
@@ -639,7 +659,7 @@ func (r *NamespaceReconciler) handleNamespaceDeletion(namespace string) {
 	}
 }
 
-func (r *NamespaceReconciler) SetupWithManager(mgr interface{}) error {
+func (r *NamespaceReconciler) SetupWithManager(mgr any) error {
 	return nil
 }
 

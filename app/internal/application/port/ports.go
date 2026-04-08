@@ -65,5 +65,5 @@ type SourceStore interface {
 }
 
 type EventPublisher interface {
-	Publish(ctx context.Context, event interface{}) error
+	Publish(ctx context.Context, event any) error
 }
