@@ -202,6 +202,10 @@ func (r *ClusterReplicationRuleReconciler) Reconcile(ctx context.Context, req re
 
 	r.updateRuleStatus(ctx, rule, targetNamespaces)
 
+	log.Debug("ClusterReplicationRule reconciled successfully",
+		"source_namespace", rule.Spec.SourceNamespace,
+		"target_namespaces", len(targetNamespaces),
+		"synced_resources", len(rule.Status.SyncedResources))
 	return reconcile.Result{}, nil
 }
 
@@ -332,7 +336,7 @@ func (r *ClusterReplicationRuleReconciler) processResourceTypeWithStats(ctx cont
 				continue
 			}
 
-			source := r.secretToSource(&secret, rule)
+			source := r.secretToSource(&secret, rule, targetNamespaces)
 			if source == nil {
 				continue
 			}
@@ -369,7 +373,7 @@ func (r *ClusterReplicationRuleReconciler) processResourceTypeWithStats(ctx cont
 				continue
 			}
 
-			source := r.configMapToSource(&cm, rule)
+			source := r.configMapToSource(&cm, rule, targetNamespaces)
 			if source == nil {
 				continue
 			}
@@ -395,7 +399,7 @@ func (r *ClusterReplicationRuleReconciler) processResourceTypeWithStats(ctx cont
 	return synced, totalMirrors, nil
 }
 
-func (r *ClusterReplicationRuleReconciler) secretToSource(secret *corev1.Secret, rule *v1.ClusterReplicationRule) *entity.Source {
+func (r *ClusterReplicationRuleReconciler) secretToSource(secret *corev1.Secret, rule *v1.ClusterReplicationRule, targetNamespaces []string) *entity.Source {
 	if secret.Annotations == nil {
 		secret.Annotations = make(map[string]string)
 	}
@@ -420,12 +424,22 @@ func (r *ClusterReplicationRuleReconciler) secretToSource(secret *corev1.Secret,
 	allowedNS, _ := valueobject.NewAllowedNamespaces([]string{"*"})
 	source.SetAllowedNamespaces(allowedNS)
 	source.SetAllowed(true)
+
+	// Enable auto-mirroring to the CRR-specified target namespaces so that
+	// handleAutoMirrors creates the mirror entries and reflectToMirror
+	// writes the actual Kubernetes secret/configmap.
+	if len(targetNamespaces) > 0 {
+		source.SetAutoEnabled(true)
+		autoNS, _ := valueobject.NewAllowedNamespaces(targetNamespaces)
+		source.SetAutoNamespaces(autoNS)
+	}
+
 	source.SetVersion(secret.ResourceVersion)
 
 	return source
 }
 
-func (r *ClusterReplicationRuleReconciler) configMapToSource(cm *corev1.ConfigMap, rule *v1.ClusterReplicationRule) *entity.Source {
+func (r *ClusterReplicationRuleReconciler) configMapToSource(cm *corev1.ConfigMap, rule *v1.ClusterReplicationRule, targetNamespaces []string) *entity.Source {
 	if cm.Annotations == nil {
 		cm.Annotations = make(map[string]string)
 	}
@@ -450,6 +464,16 @@ func (r *ClusterReplicationRuleReconciler) configMapToSource(cm *corev1.ConfigMa
 	allowedNS, _ := valueobject.NewAllowedNamespaces([]string{"*"})
 	source.SetAllowedNamespaces(allowedNS)
 	source.SetAllowed(true)
+
+	// Enable auto-mirroring to the CRR-specified target namespaces so that
+	// handleAutoMirrors creates the mirror entries and reflectToMirror
+	// writes the actual Kubernetes secret/configmap.
+	if len(targetNamespaces) > 0 {
+		source.SetAutoEnabled(true)
+		autoNS, _ := valueobject.NewAllowedNamespaces(targetNamespaces)
+		source.SetAutoNamespaces(autoNS)
+	}
+
 	source.SetVersion(cm.ResourceVersion)
 
 	return source
@@ -506,6 +530,6 @@ func (r *ClusterReplicationRuleReconciler) updateRuleStatus(ctx context.Context,
 	}
 }
 
-func (r *ClusterReplicationRuleReconciler) SetupWithManager(mgr interface{}) error {
+func (r *ClusterReplicationRuleReconciler) SetupWithManager(mgr any) error {
 	return nil
 }

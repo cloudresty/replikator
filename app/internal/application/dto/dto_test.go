@@ -151,7 +151,7 @@ func TestIsHelmConfigMap(t *testing.T) {
 func TestIsHelmResource(t *testing.T) {
 	tests := []struct {
 		name string
-		obj  interface{}
+		obj  any
 		want bool
 	}{
 		{

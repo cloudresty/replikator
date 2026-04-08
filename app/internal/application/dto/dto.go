@@ -262,7 +262,7 @@ func (e *ErrInvalidReflectsAnnotation) Error() string {
 	return "invalid reflects annotation format, expected 'namespace/name'"
 }
 
-func GetResourceVersion(obj interface{}) string {
+func GetResourceVersion(obj any) string {
 	switch v := obj.(type) {
 	case *corev1.Secret:
 		return v.ResourceVersion
@@ -276,12 +276,12 @@ func GetResourceVersion(obj interface{}) string {
 	return ""
 }
 
-func IsSecret(obj interface{}) bool {
+func IsSecret(obj any) bool {
 	_, ok := obj.(*corev1.Secret)
 	return ok
 }
 
-func IsConfigMap(obj interface{}) bool {
+func IsConfigMap(obj any) bool {
 	_, ok := obj.(*corev1.ConfigMap)
 	return ok
 }
@@ -301,7 +301,7 @@ func IsHelmSecret(secret *corev1.Secret) bool {
 	return false
 }
 
-func IsHelmResource(obj interface{}) bool {
+func IsHelmResource(obj any) bool {
 	switch v := obj.(type) {
 	case *corev1.Secret:
 		return IsHelmSecret(v)
