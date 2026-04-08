@@ -1,0 +1,547 @@
+{{- /*
+Replikator Helm Chart Template
+Conditional: Deployment vs CronJob based on cron.enabled
+*/ -}}
+{{- $fullName := include "replikator.fullname" . -}}
+{{- $namespace := .Values.namespaceOverride | default .Release.Namespace -}}
+
+{{- /*
+Namespace
+*/ -}}
+{{- if .Values.namespaceOverride -}}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $namespace }}
+  labels:
+    app.kubernetes.io/name: replikator
+    app.kubernetes.io/component: operator
+{{- end }}
+
+{{- /*
+ServiceAccount
+*/ -}}
+{{- if .Values.serviceAccount.create -}}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.serviceAccount.name | default $fullName }}
+  namespace: {{ $namespace }}
+  labels:
+    app.kubernetes.io/name: replikator
+    app.kubernetes.io/component: operator
+  {{- with .Values.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+
+{{- /*
+ClusterRole for core resources
+*/ -}}
+{{- if .Values.rbac.enabled -}}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $fullName }}
+  labels:
+    app.kubernetes.io/name: replikator
+    app.kubernetes.io/component: operator
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+
+---
+{{- /*
+ClusterRole for cert-manager resources
+*/ -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $fullName }}-cert-manager
+  labels:
+    app.kubernetes.io/name: replikator
+    app.kubernetes.io/component: operator
+rules:
+  - apiGroups:
+      - cert-manager.io
+    resources:
+      - certificates
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - networking.k8s.io
+    resources:
+      - ingresses
+    verbs:
+      - get
+      - list
+      - watch
+
+---
+{{- /*
+ClusterRoleBinding for core resources
+*/ -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $fullName }}
+  labels:
+    app.kubernetes.io/name: replikator
+    app.kubernetes.io/component: operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $fullName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.serviceAccount.name | default $fullName }}
+    namespace: {{ $namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $fullName }}-cert-manager
+  labels:
+    app.kubernetes.io/name: replikator
+    app.kubernetes.io/component: operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $fullName }}-cert-manager
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.serviceAccount.name | default $fullName }}
+    namespace: {{ $namespace }}
+{{- end }}
+
+{{- /*
+Deployment (when cron.enabled is false)
+*/ -}}
+{{- if not .Values.cron.enabled -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullName }}
+  namespace: {{ $namespace }}
+  labels:
+    app.kubernetes.io/name: replikator
+    app.kubernetes.io/component: operator
+  {{- with .Values.podLabels }}
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.podAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.replicas | default 1 }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: replikator
+      app.kubernetes.io/component: operator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: replikator
+        app.kubernetes.io/component: operator
+      {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ .Values.serviceAccount.name | default $fullName }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: replikator
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8080
+              name: metrics
+            - containerPort: 8081
+              name: health
+          args:
+            - --metrics-bind-address=:8080
+            - --health-probe-bind-address=:8081
+            - --leader-elect={{ .Values.leaderElect }}
+            {{- with .Values.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          env:
+            - name: LOGGING_MINIMUM_LEVEL
+              value: {{ .Values.configuration.logging.minimumLevel | quote }}
+            - name: REFLECTION_DELETE_ORPHANED_MIRRORS
+              value: {{ .Values.reflection.deleteOrphanedMirrors | quote }}
+            {{- if .Values.configuration.watcher.timeout }}
+            - name: WATCHER_TIMEOUT_SECONDS
+              value: {{ .Values.configuration.watcher.timeout | quote }}
+            {{- end }}
+            {{- if .Values.configuration.kubernetes.skipTlsVerify }}
+            - name: KUBERNETES_SKIP_TLS_VERIFY
+              value: "true"
+            {{- end }}
+            {{- with .Values.extraEnv }}
+              {{- toYaml . | nindent 12 }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: {{ .Values.livenessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.livenessProbe.timeoutSeconds | default 10 }}
+            failureThreshold: {{ .Values.livenessProbe.failureThreshold | default 5 }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: {{ .Values.readinessProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.readinessProbe.periodSeconds }}
+            timeoutSeconds: {{ .Values.readinessProbe.timeoutSeconds | default 10 }}
+            failureThreshold: {{ .Values.readinessProbe.failureThreshold | default 3 }}
+          {{- if .Values.startupProbe.enabled }}
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            failureThreshold: {{ .Values.startupProbe.failureThreshold | default 10 }}
+            periodSeconds: {{ .Values.startupProbe.periodSeconds | default 5 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 10 }}
+          {{- with .Values.extraVolumeMounts }}
+          volumeMounts:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+            runAsNonRoot: true
+            runAsUser: 1000
+            fsGroup: 2000
+      {{- with .Values.volumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.priorityClassName }}
+      priorityClassName: {{ .Values.priorityClassName }}
+      {{- end }}
+      {{- if .Values.hostNetwork }}
+      hostNetwork: true
+      {{- end }}
+      {{- if .Values.hostPID }}
+      hostPID: true
+      {{- end }}
+      {{- if .Values.hostIPC }}
+      hostIPC: true
+      {{- end }}
+      {{- if .Values.shareProcessNamespace }}
+      shareProcessNamespace: true
+      {{- end }}
+{{- end }}
+
+{{- /*
+CronJob (when cron.enabled is true)
+*/ -}}
+{{- if .Values.cron.enabled -}}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $fullName }}
+  namespace: {{ $namespace }}
+  labels:
+    app.kubernetes.io/name: replikator
+    app.kubernetes.io/component: operator
+  {{- with .Values.podLabels }}
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.podAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  schedule: {{ .Values.cron.schedule | quote }}
+  {{- if .Values.cron.concurrencyPolicy }}
+  concurrencyPolicy: {{ .Values.cron.concurrencyPolicy }}
+  {{- end }}
+  {{- if .Values.cron.failedJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.cron.failedJobsHistoryLimit }}
+  {{- end }}
+  {{- if .Values.cron.successfulJobsHistoryLimit }}
+  successfulJobsHistoryLimit: {{ .Values.cron.successfulJobsHistoryLimit }}
+  {{- end }}
+  {{- if .Values.cron.startingDeadlineSeconds }}
+  startingDeadlineSeconds: {{ .Values.cron.startingDeadlineSeconds }}
+  {{- end }}
+  {{- if .Values.cron.timeZone }}
+  timeZone: {{ .Values.cron.timeZone | quote }}
+  {{- end }}
+  {{- if .Values.cron.suspend }}
+  suspend: {{ .Values.cron.suspend }}
+  {{- end }}
+  jobTemplate:
+    metadata:
+      labels:
+        app.kubernetes.io/name: replikator
+        app.kubernetes.io/component: operator
+    spec:
+      {{- if .Values.cron.activeDeadlineSeconds }}
+      activeDeadlineSeconds: {{ .Values.cron.activeDeadlineSeconds }}
+      {{- end }}
+      {{- if .Values.cron.backoffLimit }}
+      backoffLimit: {{ .Values.cron.backoffLimit }}
+      {{- end }}
+      {{- if .Values.cron.ttlSecondsAfterFinished }}
+      ttlSecondsAfterFinished: {{ .Values.cron.ttlSecondsAfterFinished }}
+      {{- end }}
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: replikator
+            app.kubernetes.io/component: operator
+          {{- with .Values.podLabels }}
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        spec:
+          serviceAccountName: {{ .Values.serviceAccount.name | default $fullName }}
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 10 }}
+          {{- end }}
+          {{- with .Values.topologySpreadConstraints }}
+          topologySpreadConstraints:
+            {{- toYaml . | nindent 10 }}
+          {{- end }}
+          {{- if .Values.cron.restartPolicy }}
+          restartPolicy: {{ .Values.cron.restartPolicy }}
+          {{- else }}
+          restartPolicy: OnFailure
+          {{- end }}
+          containers:
+            - name: replikator
+              image: {{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              args:
+                - --metrics-bind-address=:8080
+                - --health-probe-bind-address=:8081
+                - --leader-elect=false
+                - --cron-mode
+                {{- with .Values.extraArgs }}
+                {{- toYaml . | nindent 14 }}
+                {{- end }}
+              env:
+                - name: LOGGING_MINIMUM_LEVEL
+                  value: {{ .Values.configuration.logging.minimumLevel | quote }}
+                - name: REFLECTION_DELETE_ORPHANED_MIRRORS
+                  value: {{ .Values.reflection.deleteOrphanedMirrors | quote }}
+                {{- if .Values.configuration.watcher.timeout }}
+                - name: WATCHER_TIMEOUT_SECONDS
+                  value: {{ .Values.configuration.watcher.timeout | quote }}
+                {{- end }}
+                {{- if .Values.configuration.kubernetes.skipTlsVerify }}
+                - name: KUBERNETES_SKIP_TLS_VERIFY
+                  value: "true"
+                {{- end }}
+                {{- with .Values.extraEnv }}
+                  {{- toYaml . | nindent 12 }}
+                {{- end }}
+              resources:
+                {{- toYaml .Values.resources | nindent 12 }}
+              {{- with .Values.extraVolumeMounts }}
+              volumeMounts:
+                {{- toYaml . | nindent 14 }}
+              {{- end }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+                runAsNonRoot: true
+                runAsUser: 1000
+                fsGroup: 2000
+          {{- with .Values.volumes }}
+          volumes:
+            {{- toYaml . | nindent 10 }}
+          {{- end }}
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 10 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 10 }}
+          {{- end }}
+          {{- with .Values.affinity }}
+          affinity:
+            {{- toYaml . | nindent 10 }}
+          {{- end }}
+          {{- if .Values.priorityClassName }}
+          priorityClassName: {{ .Values.priorityClassName }}
+          {{- end }}
+          {{- if .Values.hostNetwork }}
+          hostNetwork: true
+          {{- end }}
+          {{- if .Values.hostPID }}
+          hostPID: true
+          {{- end }}
+          {{- if .Values.hostIPC }}
+          hostIPC: true
+          {{- end }}
+          {{- if .Values.shareProcessNamespace }}
+          shareProcessNamespace: true
+          {{- end }}
+{{- end }}
+
+{{- /*
+PodDisruptionBudget
+*/ -}}
+{{- if and .Values.podDisruptionBudget.enabled (or .Values.podDisruptionBudget.minAvailable .Values.podDisruptionBudget.maxUnavailable) }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $fullName }}
+  namespace: {{ $namespace }}
+  labels:
+    app.kubernetes.io/name: replikator
+    app.kubernetes.io/component: operator
+spec:
+  {{- if .Values.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  {{- else }}
+  maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: replikator
+      app.kubernetes.io/component: operator
+{{- end }}
+
+{{- /*
+HPA
+*/ -}}
+{{- if and .Values.autoscaling.enabled (not .Values.cron.enabled) }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $fullName }}
+  namespace: {{ $namespace }}
+  labels:
+    app.kubernetes.io/name: replikator
+    app.kubernetes.io/component: operator
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ $fullName }}
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+    {{- if .Values.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetCPUUtilizationPercentage }}
+    {{- end }}
+    {{- if .Values.autoscaling.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.targetMemoryUtilizationPercentage }}
+    {{- end }}
+{{- end }}
+
+{{- /*
+Service
+*/ -}}
+{{- if .Values.service.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $fullName }}
+  namespace: {{ $namespace }}
+  labels:
+    app.kubernetes.io/name: replikator
+    app.kubernetes.io/component: operator
+spec:
+  type: {{ .Values.service.type | default "ClusterIP" }}
+  ports:
+    - port: 8080
+      targetPort: metrics
+      name: metrics
+  selector:
+    app.kubernetes.io/name: replikator
+    app.kubernetes.io/component: operator
+{{- end }}

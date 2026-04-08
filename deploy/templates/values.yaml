@@ -1,0 +1,109 @@
+nameOverride: ""
+namespaceOverride: ""
+fullnameOverride: ""
+
+replicas: 1
+
+image:
+  repository: ghcr.io/cloudresty/replikator
+  tag: latest
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+configuration:
+  logging:
+    minimumLevel: Information
+  watcher:
+    timeout: 3600
+  kubernetes:
+    skipTlsVerify: false
+
+rbac:
+  enabled: true
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+leaderElect: false
+
+livenessProbe:
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 10
+  failureThreshold: 5
+
+readinessProbe:
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 10
+  failureThreshold: 3
+
+startupProbe:
+  enabled: true
+  failureThreshold: 10
+  periodSeconds: 5
+
+resources: {}
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+topologySpreadConstraints: []
+
+priorityClassName: ""
+
+podLabels: {}
+
+podAnnotations: {}
+
+volumes: []
+
+extraVolumeMounts: []
+
+extraArgs: []
+
+extraEnv: []
+
+reflection:
+  deleteOrphanedMirrors: false
+
+service:
+  enabled: false
+  type: ClusterIP
+
+hostNetwork: false
+hostPID: false
+hostIPC: false
+shareProcessNamespace: false
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: ""
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: ""
+  maxUnavailable: ""
+
+cron:
+  enabled: false
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: ""
+  failedJobsHistoryLimit: 1
+  successfulJobsHistoryLimit: 3
+  startingDeadlineSeconds: ""
+  timeZone: ""
+  suspend: false
+  restartPolicy: OnFailure
+  activeDeadlineSeconds: ""
+  backoffLimit: 6
+  ttlSecondsAfterFinished: ""

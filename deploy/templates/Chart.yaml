@@ -1,0 +1,25 @@
+apiVersion: v1
+name: replikator
+description: A Kubernetes operator for replicating secrets and configmaps across namespaces
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - kubernetes
+  - secrets
+  - configmaps
+  - reflection
+  - replication
+  - cert-manager
+maintainers:
+  - name: CloudResty
+    url: https://github.com/cloudresty
+sources:
+  - https://github.com/cloudresty/replikator
+annotations:
+  artifacthub.io/links: |
+    - name: GitHub
+      url: https://github.com/cloudresty/replikator
+  artifacthub.io/prerelease-changelog: |
+    ## Changelog
+    - Initial release
