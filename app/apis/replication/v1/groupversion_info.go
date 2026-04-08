@@ -1,6 +1,7 @@
 package v1
 
 import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
@@ -13,6 +14,10 @@ var (
 			&ClusterReplicationRule{},
 			&ClusterReplicationRuleList{},
 		)
+		// Register standard meta types (ListOptions, DeleteOptions, etc.)
+		// under this group version so that client-go informers/reflectors
+		// can properly convert list/watch requests.
+		metav1.AddToGroupVersion(s, SchemeGroupVersion)
 		return nil
 	}
 )

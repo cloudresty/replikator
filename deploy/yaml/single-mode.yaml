@@ -111,6 +111,7 @@ metadata:
   labels:
     app.kubernetes.io/name: replikator
     app.kubernetes.io/component: operator
+    app.kubernetes.io/part-of: replikator
 
 ---
 apiVersion: v1
@@ -121,6 +122,7 @@ metadata:
   labels:
     app.kubernetes.io/name: replikator
     app.kubernetes.io/component: operator
+    app.kubernetes.io/part-of: replikator
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -130,6 +132,7 @@ metadata:
   labels:
     app.kubernetes.io/name: replikator
     app.kubernetes.io/component: operator
+    app.kubernetes.io/part-of: replikator
 rules:
   - apiGroups:
       - ""
@@ -216,6 +219,7 @@ metadata:
   labels:
     app.kubernetes.io/name: replikator
     app.kubernetes.io/component: operator
+    app.kubernetes.io/part-of: replikator
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -234,6 +238,7 @@ metadata:
   labels:
     app.kubernetes.io/name: replikator
     app.kubernetes.io/component: operator
+    app.kubernetes.io/part-of: replikator
 spec:
   replicas: 1
   selector:
@@ -245,6 +250,7 @@ spec:
       labels:
         app.kubernetes.io/name: replikator
         app.kubernetes.io/component: operator
+        app.kubernetes.io/part-of: replikator
     spec:
       serviceAccountName: replikator
       containers:
@@ -256,6 +262,8 @@ spec:
               name: metrics
             - containerPort: 8081
               name: health
+            - containerPort: 9443
+              name: webhook
           args:
             - --metrics-bind-address=:8080
             - --health-probe-bind-address=:8081
@@ -293,9 +301,15 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: webhook-tls
+              mountPath: /tmp/k8s-webhook-server/serving-certs
+              readOnly: true
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: webhook-tls
+          secret:
+            secretName: replikator-webhook-tls
 
 ---
 apiVersion: v1
@@ -306,11 +320,92 @@ metadata:
   labels:
     app.kubernetes.io/name: replikator
     app.kubernetes.io/component: operator
+    app.kubernetes.io/part-of: replikator
 spec:
   ports:
     - port: 8080
       targetPort: metrics
       name: metrics
+    - port: 9443
+      targetPort: webhook
+      name: webhook
   selector:
     app.kubernetes.io/name: replikator
     app.kubernetes.io/component: operator
+
+
+---
+# Validating Admission Webhook setup (requires cert-manager)
+# The operator's webhook server needs a valid TLS certificate to start.
+
+# Self-signed CA Issuer scoped to the replikator namespace
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: replikator-selfsigned
+  namespace: replikator
+  labels:
+    app.kubernetes.io/name: replikator
+    app.kubernetes.io/component: webhook
+    app.kubernetes.io/part-of: replikator
+spec:
+  selfSigned: {}
+
+---
+# TLS certificate - cert-manager stores it in secret 'replikator-webhook-tls'
+# and mounts it into the pod via the webhook-tls volume defined above.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: replikator-webhook
+  namespace: replikator
+  labels:
+    app.kubernetes.io/name: replikator
+    app.kubernetes.io/component: webhook
+    app.kubernetes.io/part-of: replikator
+spec:
+  secretName: replikator-webhook-tls
+  issuerRef:
+    name: replikator-selfsigned
+    kind: Issuer
+  dnsNames:
+    - replikator.replikator.svc
+    - replikator.replikator.svc.cluster.local
+
+---
+# Registers the webhook with the API server.
+# cert-manager injects the CA bundle automatically via the annotation.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: replikator
+  annotations:
+    cert-manager.io/inject-ca-from: replikator/replikator-webhook
+  labels:
+    app.kubernetes.io/name: replikator
+    app.kubernetes.io/component: webhook
+    app.kubernetes.io/part-of: replikator
+webhooks:
+  - name: validate-replikator-cloudresty-io-v1-clusterreplicationrule.replikator.io
+    admissionReviewVersions:
+      - v1
+    clientConfig:
+      service:
+        name: replikator
+        namespace: replikator
+        path: /validate-replikator-cloudresty-io-v1-clusterreplicationrule
+        port: 9443
+    rules:
+      - apiGroups:
+          - replikator.cloudresty.io
+        apiVersions:
+          - v1
+        operations:
+          - CREATE
+          - UPDATE
+        resources:
+          - clusterreplicationrules
+    failurePolicy: Fail
+    matchPolicy: Equivalent
+    sideEffects: None
+    timeoutSeconds: 10
