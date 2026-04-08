@@ -29,9 +29,6 @@ jobs:
         go-version: ${{ matrix.go-version }}
         cache: true
 
-    - name: Change to app directory
-      run: cd app
-
     - name: Install dependencies
       run: cd app && go mod download
 
@@ -46,9 +43,6 @@ jobs:
 
     - name: Vet
       run: cd app && go vet ./...
-
-    - name: Run tests
-      run: cd app && go test -v -race ./...
 
     - name: Run tests with coverage
       run: cd app && go test -v -race -coverprofile=coverage.out ./...
@@ -97,7 +91,7 @@ jobs:
       uses: docker/setup-buildx-action@v3
 
     - name: Build Docker image
-      uses: docker/build-push-action@v5
+      uses: docker/build-push-action@v6
       with:
         context: .
         file: ./build/Dockerfile
@@ -129,12 +123,21 @@ jobs:
         docker build -t cloudresty/replikator:test -f ./build/Dockerfile .
         kind load docker-image cloudresty/replikator:test --name replikator-test
 
+    - name: Install cert-manager
+      run: |
+        kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.17.0/cert-manager.yaml
+        kubectl wait --for=condition=Available deployment/cert-manager -n cert-manager --timeout=120s
+        kubectl wait --for=condition=Available deployment/cert-manager-webhook -n cert-manager --timeout=120s
+        kubectl wait --for=condition=Available deployment/cert-manager-cainjector -n cert-manager --timeout=120s
+
     - name: Deploy replikator operator
       run: |
         kubectl apply -f ./deploy/yaml/single-mode.yaml
+        # Wait for cert-manager to issue the TLS certificate before the pods can mount it
+        kubectl wait --for=condition=Ready certificate/replikator-webhook -n replikator --timeout=120s
         kubectl patch deployment replikator -n replikator --type='json' -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/image", "value":"cloudresty/replikator:test"}]'
         kubectl patch deployment replikator -n replikator --type='json' -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/imagePullPolicy", "value":"Never"}]'
-        kubectl rollout status deployment/replikator -n replikator --timeout=120s || (kubectl describe deployment replikator -n replikator && kubectl get pods -n replikator -o wide)
+        kubectl rollout status deployment/replikator -n replikator --timeout=120s || { kubectl describe deployment replikator -n replikator; kubectl get pods -n replikator -o wide; exit 1; }
 
     - name: Check replikator logs
       run: |
@@ -158,10 +161,23 @@ jobs:
     - name: Cleanup
       run: kubectl delete namespace test-namespace replikator --wait
 
-  docker-release:
-    runs-on: ubuntu-latest
+  # Build each platform in parallel on its own runner, then merge into one manifest.
+  # amd64 and arm64 no longer block each other, cutting the total time roughly in half.
+  docker-release-build:
+    name: Build (${{ matrix.platform_tag }})
+    runs-on: ${{ matrix.runs-on }}
     needs: [integration]
     if: startsWith(github.ref, 'refs/tags/v')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            platform_tag: amd64
+            runs-on: ubuntu-latest
+          - platform: linux/arm64
+            platform_tag: arm64
+            runs-on: ubuntu-24.04-arm  # native ARM64 runner, no QEMU emulation
 
     steps:
     - uses: actions/checkout@v4
@@ -171,7 +187,6 @@ jobs:
       run: |
         TAG=${GITHUB_REF#refs/tags/}
         echo "tag=$TAG" >> $GITHUB_OUTPUT
-        echo "Release version: $TAG"
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -182,18 +197,49 @@ jobs:
         username: ${{ vars.CLR__DOCKER_HUB_USERNAME }}
         password: ${{ secrets.CLR__DOCKER_HUB_PAT }}
 
-    - name: Build and push Docker image
+    - name: Build and push platform image
       uses: docker/build-push-action@v6
       with:
         context: .
         file: ./build/Dockerfile
         push: true
-        tags: |
-          cloudresty/replikator:latest
-          cloudresty/replikator:${{ steps.version.outputs.tag }}
-        cache-from: type=registry,ref=cloudresty/replikator:latest
-        cache-to: type=inline
-        platforms: linux/amd64,linux/arm64
+        # Push a platform-specific tag; the merge job combines them into the final manifest.
+        tags: cloudresty/replikator:${{ steps.version.outputs.tag }}-${{ matrix.platform_tag }}
+        platforms: ${{ matrix.platform }}
+        # Per-platform scoped cache prevents amd64 and arm64 layers from overwriting each other.
+        cache-from: type=gha,scope=release-${{ matrix.platform_tag }}
+        cache-to: type=gha,mode=max,scope=release-${{ matrix.platform_tag }}
 
-    - name: Image digest
-      run: echo "Image pushed successfully with tags - cloudresty/replikator:${{ steps.version.outputs.tag }} and cloudresty/replikator:latest"
+  # Combine the per-platform images into a single multi-arch manifest and tag it.
+  docker-release-merge:
+    name: Merge multi-platform manifest
+    runs-on: ubuntu-latest
+    needs: [docker-release-build]
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+    - name: Extract version from tag
+      id: version
+      run: |
+        TAG=${GITHUB_REF#refs/tags/}
+        echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ vars.CLR__DOCKER_HUB_USERNAME }}
+        password: ${{ secrets.CLR__DOCKER_HUB_PAT }}
+
+    - name: Create and push multi-platform manifest
+      run: |
+        docker buildx imagetools create \
+          --tag cloudresty/replikator:${{ steps.version.outputs.tag }} \
+          --tag cloudresty/replikator:latest \
+          cloudresty/replikator:${{ steps.version.outputs.tag }}-amd64 \
+          cloudresty/replikator:${{ steps.version.outputs.tag }}-arm64
+
+    - name: Inspect manifest
+      run: docker buildx imagetools inspect cloudresty/replikator:${{ steps.version.outputs.tag }}
