@@ -4,6 +4,8 @@ An enterprise-grade, blazing-fast Kubernetes operator written in Go, designed to
 
 [![Go Tests](https://github.com/cloudresty/replikator/actions/workflows/ci.yaml/badge.svg)](https://github.com/cloudresty/replikator/actions/workflows/ci.yaml)
 [![GitHub Tag](https://img.shields.io/github/v/tag/cloudresty/replikator?label=Version)](https://github.com/cloudresty/replikator/tags)
+[![Docker Image](https://img.shields.io/docker/image-size/cloudresty/replikator/latest?style=flat-square)](https://hub.docker.com/r/cloudresty/replikator)
+[![Docker Pulls](https://img.shields.io/docker/pulls/cloudresty/replikator?style=flat-square)](https://hub.docker.com/r/cloudresty/replikator)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 &nbsp;
