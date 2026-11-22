@@ -221,6 +221,8 @@ spec:
               value: {{ .Values.configuration.logging.minimumLevel | quote }}
             - name: REFLECTION_DELETE_ORPHANED_MIRRORS
               value: {{ .Values.reflection.deleteOrphanedMirrors | quote }}
+            - name: REFLECTION_RULE_RESYNC_SECONDS
+              value: {{ .Values.reflection.ruleResyncSeconds | quote }}
             {{- if .Values.configuration.watcher.timeout }}
             - name: WATCHER_TIMEOUT_SECONDS
               value: {{ .Values.configuration.watcher.timeout | quote }}
@@ -399,6 +401,8 @@ spec:
                   value: {{ .Values.configuration.logging.minimumLevel | quote }}
                 - name: REFLECTION_DELETE_ORPHANED_MIRRORS
                   value: {{ .Values.reflection.deleteOrphanedMirrors | quote }}
+                - name: REFLECTION_RULE_RESYNC_SECONDS
+                  value: {{ .Values.reflection.ruleResyncSeconds | quote }}
                 {{- if .Values.configuration.watcher.timeout }}
                 - name: WATCHER_TIMEOUT_SECONDS
                   value: {{ .Values.configuration.watcher.timeout | quote }}

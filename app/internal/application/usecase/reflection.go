@@ -1,7 +1,9 @@
 package usecase
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -245,7 +247,10 @@ func (uc *ReflectResourcesUseCase) reflectToMirror(ctx context.Context, source *
 		}
 	}
 
-	if err := uc.reflectionService.Reflect(source, mirror, sourceData); err != nil {
+	// ErrNoUpdateNeeded only says the in-memory mirror record already carries this
+	// source version. The live mirror may have been edited by hand, so fall through:
+	// updateMirrorData compares the real object and writes only when it differs.
+	if err := uc.reflectionService.Reflect(source, mirror, sourceData); err != nil && !errors.Is(err, service.ErrNoUpdateNeeded) {
 		metrics.RecordReflectionError(source.Namespace(), source.Name(), mirror.Namespace(), "reflection_validation_failed")
 		return err
 	}
@@ -285,9 +290,11 @@ func (uc *ReflectResourcesUseCase) updateMirrorData(ctx context.Context, source 
 			return uc.sourceStore.CreateSecret(ctx, secret)
 		}
 
-		// Skip the write when the source has not changed since the last sync.
+		// Skip the write when the source has not changed since the last sync and
+		// the mirror content still matches (a manual edit of the mirror is healed).
 		if secret.Annotations != nil &&
-			secret.Annotations[dto.AnnotationReflectedVersion] == source.Version() {
+			secret.Annotations[dto.AnnotationReflectedVersion] == source.Version() &&
+			bytesMapsEqual(secret.Data, sourceData) {
 			uc.logger.Debug("Mirror is already up to date",
 				"mirror", mirror.FullName(),
 				"version", source.Version())
@@ -328,9 +335,12 @@ func (uc *ReflectResourcesUseCase) updateMirrorData(ctx context.Context, source 
 			return uc.sourceStore.CreateConfigMap(ctx, cm)
 		}
 
-		// Skip the write when the source has not changed since the last sync.
+		// Skip the write when the source has not changed since the last sync and
+		// the mirror content still matches (a manual edit of the mirror is healed).
 		if cm.Annotations != nil &&
-			cm.Annotations[dto.AnnotationReflectedVersion] == source.Version() {
+			cm.Annotations[dto.AnnotationReflectedVersion] == source.Version() &&
+			stringMapsEqual(cm.Data, data) &&
+			bytesMapsEqual(cm.BinaryData, binaryData) {
 			uc.logger.Debug("Mirror is already up to date",
 				"mirror", mirror.FullName(),
 				"version", source.Version())
@@ -344,6 +354,33 @@ func (uc *ReflectResourcesUseCase) updateMirrorData(ctx context.Context, source 
 	}
 
 	return nil
+}
+
+// bytesMapsEqual compares two byte maps, treating nil and empty as equal.
+func bytesMapsEqual(a, b map[string][]byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, av := range a {
+		bv, ok := b[k]
+		if !ok || !bytes.Equal(av, bv) {
+			return false
+		}
+	}
+	return true
+}
+
+// stringMapsEqual compares two string maps, treating nil and empty as equal.
+func stringMapsEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, av := range a {
+		if bv, ok := b[k]; !ok || av != bv {
+			return false
+		}
+	}
+	return true
 }
 
 func isPrintable(data []byte) bool {
