@@ -14,7 +14,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	k8scontroller "sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1 "replikator/apis/replication/v1"
@@ -34,6 +39,9 @@ const (
 	defaultRateLimitBurst = 100
 	defaultMinDelayMs     = 100
 	defaultMaxDelayMs     = 2000
+
+	// DefaultRuleResyncPeriod is the safety-net requeue after a successful rule reconcile.
+	DefaultRuleResyncPeriod = 5 * time.Minute
 )
 
 type RateLimiter struct {
@@ -132,6 +140,7 @@ type ClusterReplicationRuleReconciler struct {
 	propertiesCache *infcache.PropertiesCache
 	notFoundCache   *infcache.NotFoundCache
 	log             logger.Logger
+	resyncPeriod    time.Duration
 }
 
 func NewClusterReplicationRuleReconciler(
@@ -155,7 +164,15 @@ func NewClusterReplicationRuleReconciler(
 		propertiesCache: propsCache,
 		notFoundCache:   notFoundCache,
 		log:             log,
+		resyncPeriod:    DefaultRuleResyncPeriod,
 	}
+}
+
+// WithResyncPeriod sets the safety-net requeue interval used after a successful
+// reconcile. Zero disables the periodic resync.
+func (r *ClusterReplicationRuleReconciler) WithResyncPeriod(d time.Duration) *ClusterReplicationRuleReconciler {
+	r.resyncPeriod = d
+	return r
 }
 
 func (r *ClusterReplicationRuleReconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
@@ -206,7 +223,7 @@ func (r *ClusterReplicationRuleReconciler) Reconcile(ctx context.Context, req re
 		"source_namespace", rule.Spec.SourceNamespace,
 		"target_namespaces", len(targetNamespaces),
 		"synced_resources", len(rule.Status.SyncedResources))
-	return reconcile.Result{}, nil
+	return reconcile.Result{RequeueAfter: r.resyncPeriod}, nil
 }
 
 func (r *ClusterReplicationRuleReconciler) compileSelector(selector string) (*regexp.Regexp, error) {
@@ -530,6 +547,73 @@ func (r *ClusterReplicationRuleReconciler) updateRuleStatus(ctx context.Context,
 	}
 }
 
-func (r *ClusterReplicationRuleReconciler) SetupWithManager(mgr any) error {
-	return nil
+// SetupWithManager registers the controller. Besides the rule itself it watches
+// Secrets and ConfigMaps cluster-wide: a change to a source (annotated or not;
+// the rule is the authorisation) or to a Replikator mirror enqueues the rules
+// that own it. Rule status writes are ignored (generation filter) to avoid loops.
+func (r *ClusterReplicationRuleReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&v1.ClusterReplicationRule{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Named("cluster-replication-rule").
+		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(r.mapSecretToRules)).
+		Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.mapConfigMapToRules)).
+		WithOptions(k8scontroller.Options{MaxConcurrentReconciles: 5}).
+		Complete(r)
+}
+
+func (r *ClusterReplicationRuleReconciler) mapSecretToRules(ctx context.Context, obj client.Object) []reconcile.Request {
+	if s, ok := obj.(*corev1.Secret); ok && dto.IsHelmSecret(s) {
+		return nil
+	}
+	return r.mapToRules(ctx, obj, "Secret")
+}
+
+func (r *ClusterReplicationRuleReconciler) mapConfigMapToRules(ctx context.Context, obj client.Object) []reconcile.Request {
+	if cm, ok := obj.(*corev1.ConfigMap); ok && dto.IsHelmConfigMap(cm) {
+		return nil
+	}
+	return r.mapToRules(ctx, obj, "ConfigMap")
+}
+
+// mapToRules returns a request for every ClusterReplicationRule that sources or
+// mirrors obj. A Replikator mirror maps back to the rules of its source (so a
+// manual edit is healed); any other object maps to the rules whose source
+// namespace, selector and resource type match it.
+func (r *ClusterReplicationRuleReconciler) mapToRules(ctx context.Context, obj client.Object, resourceType string) []reconcile.Request {
+	ns, name := obj.GetNamespace(), obj.GetName()
+	if from := obj.GetAnnotations()[dto.AnnotationReflects]; from != "" {
+		ns, name, _ = strings.Cut(from, "/")
+	}
+
+	rules := &v1.ClusterReplicationRuleList{}
+	if err := r.client.List(ctx, rules); err != nil {
+		r.log.Error("Failed to list ClusterReplicationRules for event mapping", "error", err)
+		return nil
+	}
+
+	var reqs []reconcile.Request
+	for i := range rules.Items {
+		rule := &rules.Items[i]
+		if rule.Spec.SourceNamespace != ns || !ruleCoversType(rule, resourceType) {
+			continue
+		}
+		selector, err := r.compileSelector(rule.Spec.SourceSelector)
+		if err != nil || !selector.MatchString(name) {
+			continue
+		}
+		reqs = append(reqs, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(rule)})
+	}
+	return reqs
+}
+
+func ruleCoversType(rule *v1.ClusterReplicationRule, resourceType string) bool {
+	if len(rule.Spec.ResourceTypes) == 0 {
+		return true
+	}
+	for _, rt := range rule.Spec.ResourceTypes {
+		if rt == resourceType {
+			return true
+		}
+	}
+	return false
 }

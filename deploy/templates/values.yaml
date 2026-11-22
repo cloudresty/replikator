@@ -72,6 +72,8 @@ extraEnv: []
 
 reflection:
   deleteOrphanedMirrors: false
+  # Safety-net resync of ClusterReplicationRules (seconds); 0 disables.
+  ruleResyncSeconds: 300
 
 service:
   enabled: false
