@@ -214,7 +214,7 @@ func main() {
 		propertiesCache,
 		notFoundCache,
 		log,
-	)
+	).WithResyncPeriod(cfg.RuleResyncPeriod())
 
 	sessionManager.OnSessionEnd(func() {
 		log.Info("Watch session ended, clearing caches")
@@ -333,11 +333,7 @@ func setupReconcilers(
 		return err
 	}
 
-	if err := ctrl.NewControllerManagedBy(mgr).
-		For(&v1.ClusterReplicationRule{}).
-		Named("cluster-replication-rule").
-		WithOptions(k8scontroller.Options{MaxConcurrentReconciles: 5}).
-		Complete(clusterRuleReconciler); err != nil {
+	if err := clusterRuleReconciler.SetupWithManager(mgr); err != nil {
 		return err
 	}
 

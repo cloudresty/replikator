@@ -214,6 +214,7 @@ Replikator is configured entirely through environment variables. All variables a
 | :--- | :--- | :--- |
 | `LOGGING_MINIMUM_LEVEL` | `Information` | Minimum log level. Accepts `Debug`, `Information`, `Warning`, `Error`. |
 | `WATCHER_TIMEOUT_SECONDS` | `3600` | How long (in seconds) a watch session is held open before being recycled. |
+| `REFLECTION_RULE_RESYNC_SECONDS` | `300` | Safety-net resync interval for `ClusterReplicationRule`s. Rules are also re-evaluated on every change to a matching source or mirror (no annotation needed on the source). `0` disables the periodic resync. |
 | `KUBERNETES_SKIP_TLS_VERIFY` | `false` | Skip TLS verification when connecting to the Kubernetes API. Not recommended for production. |
 | `REFLECTION_DELETE_ORPHANED_MIRRORS` | `false` | When `true`, Replikator actively deletes mirror resources whose source has been removed or has revoked replication permission. |
 
