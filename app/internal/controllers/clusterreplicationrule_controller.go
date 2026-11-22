@@ -219,6 +219,12 @@ func (r *ClusterReplicationRuleReconciler) Reconcile(ctx context.Context, req re
 
 	r.updateRuleStatus(ctx, rule, targetNamespaces)
 
+	// A failed sync returns its error so controller-runtime retries it with
+	// backoff, independent of the periodic resync (which may be disabled).
+	if reconcileErr != nil {
+		return reconcile.Result{}, fmt.Errorf("failed to process rule: %w", reconcileErr)
+	}
+
 	log.Debug("ClusterReplicationRule reconciled successfully",
 		"source_namespace", rule.Spec.SourceNamespace,
 		"target_namespaces", len(targetNamespaces),
